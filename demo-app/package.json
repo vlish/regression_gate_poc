@@ -1,0 +1,15 @@
+{
+  "name": "regression-gate-demo-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Intentionally vulnerable Node.js app for Trivy regression-gate testing",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "0.21.1",
+    "lodash": "4.17.20",
+    "minimist": "0.2.1"
+  }
+}

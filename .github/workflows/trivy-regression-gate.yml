@@ -1,0 +1,119 @@
+name: Trivy Regression Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  trivy-regression-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+
+      - name: Prepare gate script
+        run: |
+          mkdir -p scripts
+          cp pr/scripts/trivy_regression_gate.py scripts/trivy_regression_gate.py
+
+      - name: Scan base branch with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: base
+          format: sarif
+          output: base-trivy-results.sarif
+          exit-code: "0"
+          ignore-unfixed: true
+          vuln-type: os,library
+          # Full severity set so regression compares any new finding.
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          limit-severities-for-sarif: true
+
+      - name: Scan PR branch with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: pr
+          format: sarif
+          output: pr-trivy-results.sarif
+          exit-code: "0"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          limit-severities-for-sarif: true
+
+      - name: Compare SARIF reports (regression gate)
+        id: gate
+        continue-on-error: true
+        run: |
+          python3 scripts/trivy_regression_gate.py \
+            --base-sarif base-trivy-results.sarif \
+            --pr-sarif pr-trivy-results.sarif \
+            --base-ref "${{ github.event.pull_request.base.ref }}" \
+            --comment-out trivy-regression-comment.md \
+            --summary-out trivy-regression-summary.json
+
+      # S3 / Datadog upload intentionally disabled for local testing.
+
+      - name: Upload scan artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-regression-gate-reports
+          path: |
+            base-trivy-results.sarif
+            pr-trivy-results.sarif
+            trivy-regression-comment.md
+            trivy-regression-summary.json
+
+      - name: Comment regression result on PR
+        if: always() && hashFiles('trivy-regression-comment.md') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- trivy-regression-gate -->';
+            const body = fs.readFileSync('trivy-regression-comment.md', 'utf8');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find((c) => c.user.type === 'Bot' && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Fail job when new vulnerabilities are introduced
+        if: steps.gate.outcome == 'failure'
+        run: |
+          echo "Trivy regression gate failed: new vulnerabilities vs base branch."
+          cat trivy-regression-summary.json || true
+          exit 1

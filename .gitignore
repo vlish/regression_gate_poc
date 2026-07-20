@@ -1,0 +1,5 @@
+demo-app/node_modules/
+.DS_Store
+*.sarif
+trivy-regression-*.md
+trivy-regression-*.json
