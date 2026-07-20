@@ -97,6 +97,11 @@ def parse_sarif(path: Path) -> dict[str, Finding]:
     return findings
 
 
+def _md_cell(value: str) -> str:
+    """Escape values so they don't break markdown table cells."""
+    return (value or "N/A").replace("|", "\\|").replace("\n", " ").strip()
+
+
 def format_comment(new_findings: Iterable[Finding], base_ref: str) -> str:
     findings = sorted(
         new_findings,
@@ -120,22 +125,29 @@ def format_comment(new_findings: Iterable[Finding], base_ref: str) -> str:
         "",
         f"_Compared against base ref `{base_ref}`._",
         "",
+        "| CVE | Package | Installed version | Severity | Fixed version | Advisory |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
 
     for finding in findings:
-        lines.extend(
-            [
-                f"**{finding.vuln_id}**",
-                f"Package: {finding.package}",
-                f"Installed version: {finding.installed_version}",
-                f"Severity: {finding.severity}",
-                f"Fixed version: {finding.fixed_version}",
-                f"Advisory: {finding.advisory}",
-                "",
-            ]
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _md_cell(finding.vuln_id),
+                    _md_cell(finding.package),
+                    _md_cell(finding.installed_version),
+                    _md_cell(finding.severity),
+                    _md_cell(finding.fixed_version),
+                    _md_cell(finding.advisory),
+                ]
+            )
+            + " |"
         )
 
-    return "\n".join(lines).rstrip() + "\n"
+    lines.append("")
+    return "\n".join(lines)
+
 
 
 def format_pass_comment(base_ref: str, pr_count: int, base_count: int) -> str:
